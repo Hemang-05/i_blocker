@@ -34,6 +34,8 @@ class MainApplication : Application(), ReactApplication {
       override fun onActivityResumed(activity: Activity) {
         if (activity is MainActivity) {
           isMainActivityForeground = true
+          // Foreground is the safe place to start an FGS; covers returning from permission settings.
+          com.instablocker.app.monitor.BlockerMonitorService.start(this@MainApplication)
         }
       }
 

@@ -23,8 +23,10 @@ import java.util.concurrent.TimeUnit
 /**
  * Manages the native Android full-screen blocking overlay window.
  *
- * Utilizes WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY with PixelFormat.OPAQUE
- * and FLAG_NOT_FOCUSABLE to provide a flicker-free, non-bypassable full-screen barrier.
+ * Utilizes WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY (requires "Display over other apps")
+ * with PixelFormat.OPAQUE and FLAG_NOT_FOCUSABLE to provide a flicker-free full-screen barrier.
+ * Previously used TYPE_ACCESSIBILITY_OVERLAY, which required an AccessibilityService that
+ * caused UPI apps (Paytm/PhonePe/GPay) to block payments.
  */
 class OverlayController(private val context: Context) {
 
@@ -107,7 +109,7 @@ class OverlayController(private val context: Context) {
             val params = WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.MATCH_PARENT,
-                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                overlayWindowType(),
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                         WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                         WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
@@ -496,6 +498,14 @@ class OverlayController(private val context: Context) {
         }
         context.startActivity(homeIntent)
     }
+
+    private fun overlayWindowType(): Int =
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        } else {
+            @Suppress("DEPRECATION")
+            WindowManager.LayoutParams.TYPE_PHONE
+        }
 
     private fun runOnMainThread(action: () -> Unit) {
         if (Looper.myLooper() == Looper.getMainLooper()) {

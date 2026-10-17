@@ -7,6 +7,7 @@ import {
   SafeAreaView,
   ScrollView,
   Alert,
+  AppState,
 } from 'react-native';
 import { NativeBlockerService } from '../../services/nativeBlocker';
 import { ServiceStatus } from '../../types/native';
@@ -30,6 +31,11 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
 
   useEffect(() => {
     loadService();
+    // Re-check permissions when the user comes back from Android Settings.
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') loadService();
+    });
+    return () => sub.remove();
   }, []);
 
   const loadService = async () => {
@@ -41,13 +47,47 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
     }
   };
 
-  const handleOpenAccessibility = async () => {
+  const openSettings = async (open: () => Promise<void>) => {
     try {
-      await NativeBlockerService.openAccessibilitySettings();
+      await open();
     } catch {
-      Alert.alert('Error', 'Could not open accessibility settings.');
+      Alert.alert('Error', 'Could not open Android settings.');
     }
   };
+
+  const handleStartMonitoring = async () => {
+    try {
+      const started = await NativeBlockerService.startMonitoring();
+      if (!started) {
+        Alert.alert(
+          'Permissions needed',
+          'Grant Usage Access and Display Over Other Apps first.'
+        );
+      }
+      await loadService();
+    } catch (e: any) {
+      Alert.alert('Error', e?.message || 'Could not start protection.');
+    }
+  };
+
+  const renderStatusRow = (title: string, desc: string, ok: boolean | undefined) => (
+    <View style={styles.settingRow}>
+      <View style={styles.settingInfo}>
+        <Text style={styles.settingTitle}>{title}</Text>
+        <Text style={styles.settingDesc}>{desc}</Text>
+      </View>
+      <View
+        style={[
+          styles.statusPill,
+          { backgroundColor: ok ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)' },
+        ]}
+      >
+        <Text style={[styles.statusPillText, { color: ok ? '#10B981' : '#EF4444' }]}>
+          {ok ? 'ENABLED' : 'DISABLED'}
+        </Text>
+      </View>
+    </View>
+  );
 
   const handleResetState = async () => {
     Alert.alert(
@@ -114,52 +154,50 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
           </View>
         </View>
 
-        {/* Accessibility Protection Card */}
+        {/* Protection Permissions Card */}
         <View style={styles.card}>
           <Text style={styles.cardHeader}>ENFORCEMENT ENGINE</Text>
-          <View style={styles.settingRow}>
-            <View style={styles.settingInfo}>
-              <Text style={styles.settingTitle}>Accessibility Service</Text>
-              <Text style={styles.settingDesc}>
-                Required for real-time Instagram detection & blocking overlay
-              </Text>
-            </View>
-            <View
-              style={[
-                styles.statusPill,
-                {
-                  backgroundColor: serviceStatus?.isAccessibilityServiceEnabled
-                    ? 'rgba(16, 185, 129, 0.15)'
-                    : 'rgba(239, 68, 68, 0.15)',
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.statusPillText,
-                  {
-                    color: serviceStatus?.isAccessibilityServiceEnabled
-                      ? '#10B981'
-                      : '#EF4444',
-                  },
-                ]}
-              >
-                {serviceStatus?.isAccessibilityServiceEnabled
-                  ? 'ENABLED'
-                  : 'DISABLED'}
-              </Text>
-            </View>
-          </View>
+          {renderStatusRow(
+            'Usage Access',
+            'Detects when Instagram is opened',
+            serviceStatus?.hasUsageAccess
+          )}
+          {renderStatusRow(
+            'Display Over Other Apps',
+            'Shows the blocking screen over Instagram',
+            serviceStatus?.hasOverlayPermission
+          )}
+          {renderStatusRow(
+            'Protection Service',
+            'Runs in the background (does not affect UPI / payment apps)',
+            serviceStatus?.isServiceRunning
+          )}
 
-          <TouchableOpacity
-            style={styles.actionBtn}
-            onPress={handleOpenAccessibility}
-            activeOpacity={0.75}
-          >
-            <Text style={styles.actionBtnText}>
-              Open Android Accessibility Settings
-            </Text>
-          </TouchableOpacity>
+          {!serviceStatus?.hasUsageAccess ? (
+            <TouchableOpacity
+              style={styles.actionBtn}
+              onPress={() => openSettings(NativeBlockerService.openUsageAccessSettings)}
+              activeOpacity={0.75}
+            >
+              <Text style={styles.actionBtnText}>Grant Usage Access</Text>
+            </TouchableOpacity>
+          ) : !serviceStatus?.hasOverlayPermission ? (
+            <TouchableOpacity
+              style={styles.actionBtn}
+              onPress={() => openSettings(NativeBlockerService.openOverlaySettings)}
+              activeOpacity={0.75}
+            >
+              <Text style={styles.actionBtnText}>Allow Display Over Other Apps</Text>
+            </TouchableOpacity>
+          ) : !serviceStatus?.isServiceRunning ? (
+            <TouchableOpacity
+              style={styles.actionBtn}
+              onPress={handleStartMonitoring}
+              activeOpacity={0.75}
+            >
+              <Text style={styles.actionBtnText}>Start Protection</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
 
         {/* Onboarding Restart */}

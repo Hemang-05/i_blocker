@@ -20,12 +20,14 @@ NativeModules.InstaBlocker = {
   }),
   setRules: jest.fn().mockResolvedValue(undefined),
   getServiceStatus: jest.fn().mockResolvedValue({
-    isAccessibilityServiceEnabled: true,
-    isServiceConnected: true,
+    hasUsageAccess: true,
+    hasOverlayPermission: true,
+    isServiceRunning: true,
     isReady: true,
   }),
-  isAccessibilityServiceEnabled: jest.fn().mockResolvedValue(true),
-  openAccessibilitySettings: jest.fn().mockResolvedValue(undefined),
+  openUsageAccessSettings: jest.fn().mockResolvedValue(undefined),
+  openOverlaySettings: jest.fn().mockResolvedValue(undefined),
+  startMonitoring: jest.fn().mockResolvedValue(true),
   isOnboardingCompleted: jest.fn().mockResolvedValue(false),
   setOnboardingCompleted: jest.fn().mockResolvedValue(true),
   getSelectedPresetId: jest.fn().mockResolvedValue('deep_focus'),
@@ -38,8 +40,19 @@ NativeModules.InstaBlocker = {
 
 import App from '../App';
 
+beforeEach(() => {
+  jest.useFakeTimers();
+});
+
+afterEach(() => {
+  jest.runOnlyPendingTimers();
+  jest.useRealTimers();
+});
+
 test('renders correctly', async () => {
-  await ReactTestRenderer.act(() => {
+  await ReactTestRenderer.act(async () => {
     ReactTestRenderer.create(<App />);
+    jest.runAllTimers();
   });
 });
+

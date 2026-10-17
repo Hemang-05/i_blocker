@@ -1,18 +1,16 @@
 package com.instablocker.app.bridge
 
-import android.accessibilityservice.AccessibilityService
-import android.content.ComponentName
-import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.provider.Settings
-import android.text.TextUtils
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.ReadableMap
-import com.instablocker.app.accessibility.BlockerAccessibilityService
+import com.instablocker.app.monitor.BlockerMonitorService
+import com.instablocker.app.monitor.PermissionUtils
 import com.instablocker.app.storage.EnforcementStorage
 import com.instablocker.app.storage.SharedPrefsEnforcementStorage
 import java.text.SimpleDateFormat
@@ -47,7 +45,7 @@ class InstaBlockerModule(private val reactContext: ReactApplicationContext) :
             val isDailyLocked = storage.isDailyLocked() || sessionsCompleted >= maxSessions
             val cooldownUntil = storage.getCooldownUntil()
             val cooldownRemainingMs = if (now < cooldownUntil) cooldownUntil - now else 0L
-            val isInstagramSessionActive = BlockerAccessibilityService.isInstagramSessionActive()
+            val isInstagramSessionActive = BlockerMonitorService.isInstagramSessionActive()
 
             val stateString = when {
                 isDailyLocked -> "DAILY_LOCKED"
@@ -129,7 +127,7 @@ class InstaBlockerModule(private val reactContext: ReactApplicationContext) :
             }
 
             // Immediately notify active EnforcementEngine so running timers & checks adapt instantaneously
-            BlockerAccessibilityService.instance?.enforcementEngine?.onRulesChanged()
+            BlockerMonitorService.withEngine { it.onRulesChanged() }
             com.instablocker.app.util.DebugLogger.d("Rules updated and active engine notified: limit=${usageLimitMs}ms, cooldown=${cooldownDurationMs}ms, maxSessions=${maxSessionsPerDay}")
 
             promise.resolve(null)
@@ -158,7 +156,7 @@ class InstaBlockerModule(private val reactContext: ReactApplicationContext) :
             storage.setLockUntilMidnightEnabled(true)
             storage.setCooldownNotificationsEnabled(false)
 
-            BlockerAccessibilityService.instance?.enforcementEngine?.onRulesChanged()
+            BlockerMonitorService.withEngine { it.onRulesChanged() }
             com.instablocker.app.util.DebugLogger.d("Applied DEBUG preset: limit=30s, cooldown=60s, maxSessions=2")
 
             val map = Arguments.createMap().apply {
@@ -189,7 +187,7 @@ class InstaBlockerModule(private val reactContext: ReactApplicationContext) :
             storage.setLockUntilMidnightEnabled(EnforcementStorage.DEFAULT_LOCK_UNTIL_MIDNIGHT)
             storage.setCooldownNotificationsEnabled(EnforcementStorage.DEFAULT_COOLDOWN_NOTIFICATIONS)
 
-            BlockerAccessibilityService.instance?.enforcementEngine?.onRulesChanged()
+            BlockerMonitorService.withEngine { it.onRulesChanged() }
             com.instablocker.app.util.DebugLogger.d("Reset rules to default production values (10m / 90m / 4 sessions)")
 
             val map = Arguments.createMap().apply {
@@ -222,10 +220,7 @@ class InstaBlockerModule(private val reactContext: ReactApplicationContext) :
             storage.setCooldownUntil(0L)
             storage.setDailyLocked(false)
 
-            val service = BlockerAccessibilityService.instance
-            if (service != null && service.enforcementEngine != null) {
-                service.enforcementEngine.resetEnforcementState()
-            }
+            BlockerMonitorService.withEngine { it.resetEnforcementState() }
 
             com.instablocker.app.util.DebugLogger.d("[DEBUG] Enforcement state reset: 0 sessions, cooldown=0, dailyLocked=false")
 
@@ -245,25 +240,39 @@ class InstaBlockerModule(private val reactContext: ReactApplicationContext) :
     }
 
     /**
-     * Checks if the Accessibility Service is enabled in system settings.
+     * Opens the system "Usage access" screen so the user can grant foreground-app detection.
      */
     @ReactMethod
-    fun isAccessibilityServiceEnabled(promise: Promise) {
+    fun openUsageAccessSettings(promise: Promise) {
         try {
-            val isEnabled = isServiceEnabled(reactContext, BlockerAccessibilityService::class.java)
-            promise.resolve(isEnabled)
+            val direct = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply {
+                data = Uri.parse("package:${reactContext.packageName}")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            try {
+                reactContext.startActivity(direct)
+            } catch (_: Exception) {
+                // Some OEMs don't support the per-app deep link; fall back to the list screen.
+                reactContext.startActivity(
+                    Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            }
+            promise.resolve(null)
         } catch (e: Exception) {
-            promise.reject("ACCESSIBILITY_CHECK_FAILED", e.message, e)
+            promise.reject("OPEN_SETTINGS_FAILED", e.message, e)
         }
     }
 
     /**
-     * Launches Android Accessibility Settings.
+     * Opens the system "Display over other apps" screen for this app.
      */
     @ReactMethod
-    fun openAccessibilitySettings(promise: Promise) {
+    fun openOverlaySettings(promise: Promise) {
         try {
-            val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+            val intent = Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:${reactContext.packageName}")
+            ).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             reactContext.startActivity(intent)
@@ -274,17 +283,31 @@ class InstaBlockerModule(private val reactContext: ReactApplicationContext) :
     }
 
     /**
-     * Returns comprehensive service status for onboarding.
+     * Starts the foreground monitor service. Resolves false if permissions are missing.
+     */
+    @ReactMethod
+    fun startMonitoring(promise: Promise) {
+        try {
+            promise.resolve(BlockerMonitorService.start(reactContext.applicationContext))
+        } catch (e: Exception) {
+            promise.reject("START_MONITORING_FAILED", e.message, e)
+        }
+    }
+
+    /**
+     * Returns permission + service status for onboarding and the dashboard.
      */
     @ReactMethod
     fun getServiceStatus(promise: Promise) {
         try {
-            val isEnabled = isServiceEnabled(reactContext, BlockerAccessibilityService::class.java)
-            val isConnected = BlockerAccessibilityService.isConnected()
+            val hasUsageAccess = PermissionUtils.hasUsageAccess(reactContext)
+            val hasOverlayPermission = PermissionUtils.canDrawOverlays(reactContext)
+            val isRunning = BlockerMonitorService.isRunning()
             val map = Arguments.createMap().apply {
-                putBoolean("isAccessibilityServiceEnabled", isEnabled)
-                putBoolean("isServiceConnected", isConnected)
-                putBoolean("isReady", isEnabled && isConnected)
+                putBoolean("hasUsageAccess", hasUsageAccess)
+                putBoolean("hasOverlayPermission", hasOverlayPermission)
+                putBoolean("isServiceRunning", isRunning)
+                putBoolean("isReady", hasUsageAccess && hasOverlayPermission && isRunning)
             }
             promise.resolve(map)
         } catch (e: Exception) {
@@ -399,28 +422,5 @@ class InstaBlockerModule(private val reactContext: ReactApplicationContext) :
         } else if (lastReset.isEmpty()) {
             storage.setLastResetDate(today)
         }
-    }
-
-    private fun isServiceEnabled(context: Context, serviceClass: Class<out AccessibilityService>): Boolean {
-        val expectedComponentName = ComponentName(context, serviceClass).flattenToString()
-        val expectedShortName = "${context.packageName}/${serviceClass.name}"
-
-        val enabledServicesSetting = Settings.Secure.getString(
-            context.contentResolver,
-            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-        ) ?: return false
-
-        val colonSplitter = TextUtils.SimpleStringSplitter(':')
-        colonSplitter.setString(enabledServicesSetting)
-
-        while (colonSplitter.hasNext()) {
-            val componentName = colonSplitter.next()
-            if (componentName.equals(expectedComponentName, ignoreCase = true) ||
-                componentName.equals(expectedShortName, ignoreCase = true) ||
-                componentName.contains(serviceClass.simpleName, ignoreCase = true)) {
-                return true
-            }
-        }
-        return false
     }
 }

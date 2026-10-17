@@ -23,8 +23,12 @@ export interface BlockingRules {
 }
 
 export interface ServiceStatus {
-  isAccessibilityServiceEnabled: boolean;
-  isServiceConnected: boolean;
+  /** "Usage access" granted — needed to detect when Instagram is opened. */
+  hasUsageAccess: boolean;
+  /** "Display over other apps" granted — needed to show the blocking screen. */
+  hasOverlayPermission: boolean;
+  /** Foreground monitor service is currently running. */
+  isServiceRunning: boolean;
   isReady: boolean;
 }
 
@@ -32,8 +36,9 @@ export interface InstaBlockerNativeModule {
   getStatus(): Promise<EnforcementStatus>;
   getRules(): Promise<BlockingRules>;
   setRules(rules: BlockingRules): Promise<void>;
-  isAccessibilityServiceEnabled(): Promise<boolean>;
-  openAccessibilitySettings(): Promise<void>;
+  openUsageAccessSettings(): Promise<void>;
+  openOverlaySettings(): Promise<void>;
+  startMonitoring(): Promise<boolean>;
   getServiceStatus(): Promise<ServiceStatus>;
   resetEnforcementState?(): Promise<EnforcementStatus>;
   syncDailyTasks(tasksJson: string): Promise<boolean>;

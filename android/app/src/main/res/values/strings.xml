@@ -1,6 +1,5 @@
 <resources>
     <string name="app_name">InstaBlocker</string>
-    <string name="accessibility_service_description">Monitors app usage to enforce healthy self-control limits on distracting applications like Instagram.</string>
     <string name="blocker_title">Instagram Paused</string>
     <string name="blocker_daily_limit_title">Daily Limit Reached</string>
     <string name="blocker_cooldown_title">Cooldown in Progress</string>

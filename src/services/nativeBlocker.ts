@@ -1,4 +1,4 @@
-import { NativeModules, Platform } from 'react-native';
+import { NativeModules, PermissionsAndroid, Platform } from 'react-native';
 import type {
   BlockingRules,
   EnforcementStatus,
@@ -81,23 +81,42 @@ export const NativeBlockerService = {
   },
 
   /**
-   * Checks whether the BlockerAccessibilityService is currently enabled in system settings.
+   * Opens Android "Usage access" settings (needed to detect when Instagram is opened).
    */
-  async isAccessibilityServiceEnabled(): Promise<boolean> {
+  async openUsageAccessSettings(): Promise<void> {
     const module = getNativeModule();
-    return module.isAccessibilityServiceEnabled();
+    return module.openUsageAccessSettings();
   },
 
   /**
-   * Opens Android Accessibility Settings so the user can enable the service.
+   * Opens Android "Display over other apps" settings (needed for the blocking screen).
    */
-  async openAccessibilitySettings(): Promise<void> {
+  async openOverlaySettings(): Promise<void> {
     const module = getNativeModule();
-    return module.openAccessibilitySettings();
+    return module.openOverlaySettings();
   },
 
   /**
-   * Returns readiness status of the accessibility service for onboarding.
+   * Starts the native foreground monitor. Requests notification permission on Android 13+
+   * so the persistent "protection active" notification is visible.
+   * Resolves false if Usage Access / overlay permission are still missing.
+   */
+  async startMonitoring(): Promise<boolean> {
+    if (Platform.OS === 'android' && Number(Platform.Version) >= 33) {
+      try {
+        await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS
+        );
+      } catch {
+        // Non-fatal: the service still runs without a visible notification.
+      }
+    }
+    const module = getNativeModule();
+    return module.startMonitoring();
+  },
+
+  /**
+   * Returns permission + monitor service status for onboarding and the dashboard.
    */
   async getServiceStatus(): Promise<ServiceStatus> {
     const module = getNativeModule();

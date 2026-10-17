@@ -65,16 +65,38 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     setRefreshing(false);
   };
 
-  const handleOpenAccessibility = async () => {
+  // Walk the user through whichever step is still missing.
+  const handleFixProtection = async () => {
     try {
-      await NativeBlockerService.openAccessibilitySettings();
+      if (!serviceStatus?.hasUsageAccess) {
+        await NativeBlockerService.openUsageAccessSettings();
+      } else if (!serviceStatus?.hasOverlayPermission) {
+        await NativeBlockerService.openOverlaySettings();
+      } else {
+        await NativeBlockerService.startMonitoring();
+        await fetchState();
+      }
     } catch {
       // Ignore
     }
   };
 
   // Determine badge styling based on state
-  const isProtected = serviceStatus?.isAccessibilityServiceEnabled;
+  const isProtected = serviceStatus?.isReady;
+  const setupStep = !serviceStatus?.hasUsageAccess
+    ? {
+        title: 'Usage Access Required',
+        desc: 'Tap to allow InstaBlocker to detect when Instagram is opened.',
+      }
+    : !serviceStatus?.hasOverlayPermission
+    ? {
+        title: 'Display Over Other Apps Required',
+        desc: 'Tap to allow InstaBlocker to show the blocking screen.',
+      }
+    : {
+        title: 'Protection Paused',
+        desc: 'Tap to start InstaBlocker protection.',
+      };
   const isCooldown = status?.state === 'COOLDOWN';
   const isDailyLocked = status?.dailyLocked || status?.state === 'DAILY_LOCKED';
   const isInSession = status?.state === 'IN_SESSION';
@@ -123,19 +145,17 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           </View>
         </View>
 
-        {/* Accessibility Protection Notice if Disabled */}
+        {/* Protection setup notice if a permission is missing or the service is stopped */}
         {!isProtected ? (
           <TouchableOpacity
             style={styles.warningBanner}
-            onPress={handleOpenAccessibility}
+            onPress={handleFixProtection}
             activeOpacity={0.8}
           >
             <Text style={styles.warningIcon}>⚠️</Text>
             <View style={styles.warningTextContainer}>
-              <Text style={styles.warningTitle}>Accessibility Service Inactive</Text>
-              <Text style={styles.warningDesc}>
-                Tap here to enable InstaBlocker in Android settings.
-              </Text>
+              <Text style={styles.warningTitle}>{setupStep.title}</Text>
+              <Text style={styles.warningDesc}>{setupStep.desc}</Text>
             </View>
             <Text style={styles.warningArrow}>→</Text>
           </TouchableOpacity>
